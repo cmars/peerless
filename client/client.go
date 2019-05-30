@@ -26,39 +26,48 @@ func New(url string) *Client {
 	}
 }
 
-func (c *Client) Do() error {
+func (c *Client) Clone() *Client {
+	clonedAuth := *c.auth
+	return &Client{
+		url:     c.url,
+		auth:    &clonedAuth,
+		counter: c.counter,
+	}
+}
+
+func (c *Client) Do() (bool, error) {
 	if c.auth == nil {
-		return c.doAuth()
+		return false, c.doAuth()
 	}
 	req, err := http.NewRequest("GET", strings.TrimRight(c.url, "/")+"/", nil)
 	if err != nil {
-		return errors.Wrap(err, "failed to create http.Request")
+		return false, errors.Wrap(err, "failed to create http.Request")
 	}
 	authJson, err := json.Marshal(c.auth)
 	if err != nil {
-		return errors.Wrap(err, "failed to marshal auth")
+		return false, errors.Wrap(err, "failed to marshal auth")
 	}
 	authEnc := base64.StdEncoding.EncodeToString(authJson)
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %v", authEnc))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return errors.Wrap(err, "failed to make request")
+		return false, errors.Wrap(err, "failed to make request")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		c.counter++
 		c.auth.Next(c.counter)
-		return nil
+		return true, nil
 	} else if resp.StatusCode == http.StatusUnauthorized {
-		return c.doAuth()
+		return false, c.doAuth()
 	} else {
 		var respBody [1024]byte
 		_, err := resp.Body.Read(respBody[:])
 		if err != nil {
 			log.Printf("failed to read response: %+v", err)
-			return errors.Errorf("request failed: %s", resp.Status)
+			return false, errors.Errorf("request failed: %s", resp.Status)
 		}
-		return errors.Errorf("request failed: %s %v", resp.Status, string(respBody[:]))
+		return false, errors.Errorf("request failed: %s %v", resp.Status, string(respBody[:]))
 	}
 	panic("unreachable")
 }
@@ -98,5 +107,6 @@ func (c *Client) doAuth() error {
 		return errors.Wrap(err, "failed to unmarshal token")
 	}
 	c.auth = &auth
+	c.counter = 0
 	return nil
 }

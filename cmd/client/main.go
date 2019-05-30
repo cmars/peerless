@@ -9,11 +9,15 @@ import (
 func main() {
 	cl := client.New("http://localhost:8080")
 	for {
-		err := cl.Do()
+		ok, err := cl.Do()
 		if err != nil {
 			log.Printf("%+v", err)
 		} else {
-			log.Println("ok")
+			if ok {
+				log.Println("ok")
+			} else {
+				log.Println("auth")
+			}
 		}
 	}
 }

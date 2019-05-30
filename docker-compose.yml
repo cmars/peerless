@@ -1,0 +1,18 @@
+version: '3'
+services:
+  redis:
+    image: redis:latest
+    restart: always
+    ports:
+    - 6379:6379
+  server:
+    build:
+      context: .
+      dockerfile: ./cmd/server/Dockerfile
+    restart: always
+    depends_on:
+    - redis
+    ports:
+    - 8080:8080
+    environment:
+    - REDIS_ADDR=redis:6379

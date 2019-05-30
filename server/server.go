@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/go-redis/redis"
@@ -63,6 +64,30 @@ func (s *Service) IndexHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "OK")
 }
 
+func (s *Service) StatsHandler(w http.ResponseWriter, r *http.Request) {
+	fail := func(code int, err error) {
+		w.WriteHeader(code)
+		fmt.Fprintf(w, "%v", err)
+	}
+	if r.Method == "DELETE" {
+		_, err := s.db.Del("ntokens").Result()
+		if err != nil {
+			fail(http.StatusInternalServerError, err)
+			return
+		}
+	} else if r.Method == "GET" {
+		n, err := s.db.PFCount("ntokens").Result()
+		if err != nil {
+			fail(http.StatusInternalServerError, err)
+			return
+		}
+		fmt.Fprintf(w, "%d", n)
+	} else {
+		fail(http.StatusBadRequest, errors.Errorf("unsupported method %q", r.Method))
+		return
+	}
+}
+
 func (s *Service) Authorize(req *http.Request) (bool, int, error) {
 	authHeader := req.Header.Get("Authorization")
 	authHeaderFields := strings.SplitN(authHeader, " ", 2)
@@ -90,12 +115,20 @@ func (s *Service) Authorize(req *http.Request) (bool, int, error) {
 		log.Printf("failed to increment token counter")
 		return false, http.StatusBadRequest, err
 	}
+	if _, err := s.db.PFAdd("ntokens", auth.Secret).Result(); err != nil {
+		log.Printf("warning: failed to update stats for auth: %v", err)
+	}
 	return hotp.Validate(auth.Code, uint64(counter-1), auth.Secret), http.StatusOK, nil
 }
 
 func Run() {
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
+
 	db := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
+		Addr:     redisAddr,
 		Password: "",
 		DB:       0,
 	})
@@ -104,6 +137,7 @@ func Run() {
 		log.Fatalf("failed to connect to redis: %v", err)
 	}
 	s := NewService(db)
+	http.HandleFunc("/stats", s.StatsHandler)
 	http.HandleFunc("/token", s.TokenHandler)
 	http.HandleFunc("/", s.IndexHandler)
 	log.Fatal(http.ListenAndServe(":8080", nil))
